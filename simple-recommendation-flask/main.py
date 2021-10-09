@@ -1,5 +1,6 @@
 import pandas as pd 
 import numpy as np
+from math import floor
 
 from flask import Flask, request, jsonify, abort
 from flask_restful import Resource, Api 
@@ -37,50 +38,49 @@ def get_recs(movie_id, M, num):
         reviews.sort(key=lambda tup: tup[1], reverse=True)
     return reviews[:num]
 
-def get_paginated_list(results, url, start, limit):
-    start = int(start)
-    limit = int(limit)
-    count = len(results)
-    if count < start or limit < 0:
-        abort(404)
-    # make response
-    obj = {}
-    obj['start'] = start
-    obj['limit'] = limit
-    obj['count'] = count
-    # make URLs
-    # make previous url
-    if start == 1:
-        obj['previous'] = ''
+def get_paginated_result(url, list, args):
+    page_size = int(args.get('page_size', 10))
+    page = int(args.get('page', 1))
+    page_count = int((len(list) + page_size - 1) / page_size)
+    start = (page - 1) * page_size
+    end = min(start + page_size, len(list))
+
+    if page<page_count:
+        next = f'{url}?page={page+1}&page_size={page_size}'
     else:
-        start_copy = max(1, start - limit)
-        limit_copy = start - 1
-        obj['previous'] = url + '?start=%d&limit=%d' % (start_copy, limit_copy)
-    # make next url
-    if start + limit > count:
-        obj['next'] = ''
+        next=None
+    if page>1:
+        prev = f'{url}?page={page-1}&page_size={page_size}'
     else:
-        start_copy = start + limit
-        obj['next'] = url + '?start=%d&limit=%d' % (start_copy, limit)
-    # finally extract result according to bounds
-    obj['results'] = results[(start - 1):(start - 1 + limit)]
-    return obj
+        prev = None
+    
+    if page > page_count or page < 1:
+        abort(404, description = f'Halaman {page} tidak ditemukan.') 
+    return  {
+        'page': page, 
+        'page_size': page_size,
+        'next': next, 
+        'prev': prev,
+        'Results': list[start:end]
+    }
 
 class Movie(Resource):
     def get(self):
-        return jsonify(get_paginated_list(
-        film_data, 
-        '/movies', 
-        start=request.args.get('start', 1), 
-        limit=request.args.get('limit', 20)
-    ))
+
+        return get_paginated_result('movies/', film_data, request.args)
+
 
 class Recommendation(Resource):
     def get(self, movie_id):
         length = request.args.get('length', 10)
         recommendations = get_recs(movie_id, M, int(length))
         results = [{'movie_id': int(rec[0]),'movie_title': film_data_dict[int(rec[0])], 'score': round(rec[1] * 100, 2)} for rec in recommendations]
-        return jsonify(results)
+
+        return jsonify({
+            'movie_id': int(movie_id),
+            'movie_title': film_data_dict[int(movie_id)],
+            'recommendations': results
+        })
 
 api.add_resource(Movie, '/movies')
 api.add_resource(Recommendation, '/recommendation/<movie_id>')
